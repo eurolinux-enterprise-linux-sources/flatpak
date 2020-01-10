@@ -4,7 +4,7 @@
 
 Name:           flatpak
 Version:        %{flatpak_version}
-Release:        2%{?dist}
+Release:        4%{?dist}
 Summary:        Application deployment framework for desktop apps
 
 License:        LGPLv2+
@@ -19,6 +19,8 @@ Patch0:         no-user-systemd.patch
 # Make sure our resulting binaries always have the rpath set to the bundled
 # ostree directory
 Patch1:         flatpak-ostree-bundle.patch
+# https://bugzilla.redhat.com/show_bug.cgi?id=1675433
+Patch2:         flatpak-1.0.2-CVE-2019-5736.patch
 
 BuildRequires:  pkgconfig(appstream-glib)
 BuildRequires:  pkgconfig(fuse)
@@ -129,6 +131,7 @@ This package contains libflatpak.
 %setup -q -a 1 -a 2
 %patch0 -p1
 %patch1 -p1
+%patch2 -p1
 
 
 %build
@@ -285,6 +288,12 @@ flatpak remote-list --system &> /dev/null || :
 
 
 %changelog
+* Fri Feb 15 2019 David King <dking@redhat.com> - 1.0.2-4
+- Tweak /proc sandbox patch (#1675433)
+
+* Wed Feb 13 2019 David King <dking@redhat.com> - 1.0.2-3
+- Do not mount /proc in root sandbox (#1675433)
+
 * Thu Sep 13 2018 Kalev Lember <klember@redhat.com> - 1.0.2-2
 - Update to 1.0.2 (#1570030)
 

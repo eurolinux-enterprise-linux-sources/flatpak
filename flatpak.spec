@@ -4,7 +4,7 @@
 
 Name:           flatpak
 Version:        %{flatpak_version}
-Release:        5%{?dist}
+Release:        7%{?dist}
 Summary:        Application deployment framework for desktop apps
 
 License:        LGPLv2+
@@ -19,10 +19,12 @@ Patch0:         no-user-systemd.patch
 # Make sure our resulting binaries always have the rpath set to the bundled
 # ostree directory
 Patch1:         flatpak-ostree-bundle.patch
-# https://bugzilla.redhat.com/show_bug.cgi?id=1675433
-Patch2:         flatpak-1.0.2-CVE-2019-5736.patch
-# https://bugzilla.redhat.com/show_bug.cgi?id=1700651
-Patch3:         flatpak-1.0.2-CVE-2019-10063.patch
+# https://bugzilla.redhat.com/show_bug.cgi?id=1660137
+Patch2:         flatpak-1.0.4-oci-fixes.patch
+# https://bugzilla.redhat.com/show_bug.cgi?id=1675435
+Patch3:         flatpak-1.0.2-CVE-2019-5736.patch
+# https://bugzilla.redhat.com/show_bug.cgi?id=1700652
+Patch4:         flatpak-1.0.2-CVE-2019-10063.patch
 
 BuildRequires:  pkgconfig(appstream-glib)
 BuildRequires:  pkgconfig(fuse)
@@ -135,6 +137,7 @@ This package contains libflatpak.
 %patch1 -p1
 %patch2 -p1
 %patch3 -p1
+%patch4 -p1
 
 
 %build
@@ -291,14 +294,20 @@ flatpak remote-list --system &> /dev/null || :
 
 
 %changelog
-* Mon Apr 29 2019 David King <dking@redhat.com> - 1.0.2-5
-- Fix IOCSTI sandbox bypass (#1700651)
+* Mon Apr 29 2019 David King <dking@redhat.com> - 1.0.2-7
+- Fix IOCSTI sandbox bypass (#1700652)
 
-* Fri Feb 15 2019 David King <dking@redhat.com> - 1.0.2-4
-- Tweak /proc sandbox patch (#1675433)
+* Fri Feb 15 2019 David King <dking@redhat.com> - 1.0.2-6
+- Tweak /proc sandbox patch (#1675435)
 
-* Wed Feb 13 2019 David King <dking@redhat.com> - 1.0.2-3
-- Do not mount /proc in root sandbox (#1675433)
+* Wed Feb 13 2019 David King <dking@redhat.com> - 1.0.2-5
+- Do not mount /proc in root sandbox (#1675435)
+
+* Mon Jan 14 2019 David King <dking@redhat.com> - 1.0.2-4
+- Apply the OCI support patch (#1660137)
+
+* Mon Jan 07 2019 David King <dking@redhat.com> - 1.0.2-3
+- Backport patches to improve OCI support (#1660137)
 
 * Thu Sep 13 2018 Kalev Lember <klember@redhat.com> - 1.0.2-2
 - Update to 1.0.2 (#1570030)

@@ -32,7 +32,7 @@
 #include <unistd.h>
 #include <gio/gunixfdlist.h>
 
-#include <glib/gi18n.h>
+#include <glib/gi18n-lib.h>
 
 #include <gio/gio.h>
 #include "libglnx/libglnx.h"
@@ -245,7 +245,7 @@ flatpak_bwrap_add_args_data (FlatpakBwrap *bwrap,
   if (!flatpak_buffer_to_sealed_memfd_or_tmpfile (&args_tmpf, name, content, content_size, error))
     return FALSE;
 
-  flatpak_bwrap_add_args_data_fd (bwrap, "--bind-data", glnx_steal_fd (&args_tmpf.fd), path);
+  flatpak_bwrap_add_args_data_fd (bwrap, "--ro-bind-data", glnx_steal_fd (&args_tmpf.fd), path);
   return TRUE;
 }
 

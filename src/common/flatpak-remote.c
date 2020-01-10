@@ -20,6 +20,8 @@
 
 #include "config.h"
 
+#include <glib/gi18n-lib.h>
+
 #include "flatpak-utils-private.h"
 #include "flatpak-remote-private.h"
 #include "flatpak-remote-ref-private.h"
@@ -784,6 +786,25 @@ flatpak_remote_new (const char *name)
   return flatpak_remote_new_with_dir (name, NULL);
 }
 
+/* copied from GLib */
+static gboolean
+g_key_file_is_group_name (const gchar *name)
+{
+  gchar *p, *q;
+
+  if (name == NULL)
+    return FALSE;
+
+  p = q = (gchar *) name;
+  while (*q && *q != ']' && *q != '[' && !g_ascii_iscntrl (*q))
+    q = g_utf8_find_next_char (q, NULL);
+
+  if (*q != '\0' || q == p)
+    return FALSE;
+
+  return TRUE;
+}
+
 gboolean
 flatpak_remote_commit (FlatpakRemote *self,
                        FlatpakDir    *dir,
@@ -797,9 +818,12 @@ flatpak_remote_commit (FlatpakRemote *self,
   g_autoptr(GKeyFile) config = NULL;
   g_autofree char *group = g_strdup_printf ("remote \"%s\"", priv->name);
 
+  if (!g_key_file_is_group_name (group))
+    return flatpak_fail_error (error, FLATPAK_ERROR_INVALID_DATA, _("Bad remote name: %s"), priv->name);
+    
   url = flatpak_remote_get_url (self);
   if (url == NULL || *url == 0)
-    return flatpak_fail (error, "No url specified");
+    return flatpak_fail_error (error, FLATPAK_ERROR_INVALID_DATA, _("No url specified"));
 
   if (priv->type != FLATPAK_REMOTE_TYPE_STATIC)
     return flatpak_fail (error, "Dynamic remote cannot be committed");
@@ -857,6 +881,9 @@ flatpak_remote_commit (FlatpakRemote *self,
 
   if (priv->local_disabled_set)
     g_key_file_set_boolean (config, group, "xa.disable", priv->local_disabled);
+
+  if (priv->local_nodeps_set)
+    g_key_file_set_boolean (config, group, "xa.nodeps", priv->local_nodeps);
 
   if (priv->local_prio_set)
     {

@@ -1,10 +1,10 @@
-%global flatpak_version 1.0.2
+%global flatpak_version 1.0.9
 %global flatpak_builder_version 1.0.0
 %global ostree_version 2018.8
 
 Name:           flatpak
 Version:        %{flatpak_version}
-Release:        7%{?dist}
+Release:        8%{?dist}
 Summary:        Application deployment framework for desktop apps
 
 License:        LGPLv2+
@@ -21,10 +21,6 @@ Patch0:         no-user-systemd.patch
 Patch1:         flatpak-ostree-bundle.patch
 # https://bugzilla.redhat.com/show_bug.cgi?id=1660137
 Patch2:         flatpak-1.0.4-oci-fixes.patch
-# https://bugzilla.redhat.com/show_bug.cgi?id=1675435
-Patch3:         flatpak-1.0.2-CVE-2019-5736.patch
-# https://bugzilla.redhat.com/show_bug.cgi?id=1700652
-Patch4:         flatpak-1.0.2-CVE-2019-10063.patch
 
 BuildRequires:  pkgconfig(appstream-glib)
 BuildRequires:  pkgconfig(fuse)
@@ -136,8 +132,6 @@ This package contains libflatpak.
 %patch0 -p1
 %patch1 -p1
 %patch2 -p1
-%patch3 -p1
-%patch4 -p1
 
 
 %build
@@ -294,6 +288,9 @@ flatpak remote-list --system &> /dev/null || :
 
 
 %changelog
+* Fri Sep 20 2019 Kalev Lember <klember@redhat.com> - 1.0.9-8
+- Update to 1.0.9 (#1753591)
+
 * Mon Apr 29 2019 David King <dking@redhat.com> - 1.0.2-7
 - Fix IOCSTI sandbox bypass (#1700652)
 

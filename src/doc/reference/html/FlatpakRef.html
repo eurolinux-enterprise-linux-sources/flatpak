@@ -8,7 +8,7 @@
 <link rel="up" href="ch01.html" title="Flatpak">
 <link rel="prev" href="FlatpakTransaction.html" title="FlatpakTransaction">
 <link rel="next" href="FlatpakInstalledRef.html" title="FlatpakInstalledRef">
-<meta name="generator" content="GTK-Doc V1.28.1 (XML mode)">
+<meta name="generator" content="GTK-Doc V1.32.1 (XML mode)">
 <link rel="stylesheet" href="style.css" type="text/css">
 </head>
 <body bgcolor="white" text="black" link="#0000FF" vlink="#840084" alink="#0000FF">
@@ -37,8 +37,8 @@
 <a name="FlatpakRef.functions"></a><h2>Functions</h2>
 <div class="informaltable"><table class="informaltable" width="100%" border="0">
 <colgroup>
-<col width="150px" class="functions_return">
-<col class="functions_name">
+<col width="150px" class="functions_proto_type">
+<col class="functions_proto_name">
 </colgroup>
 <tbody>
 <tr>
@@ -116,36 +116,36 @@
 <td class="property_type">
 <span class="type">gchar</span> *</td>
 <td class="property_name"><a class="link" href="FlatpakRef.html#FlatpakRef--arch" title="The “arch” property">arch</a></td>
-<td class="property_flags">Read / Write / Construct Only</td>
+<td class="property_flags">Read / Write / Construct Only</td>
 </tr>
 <tr>
 <td class="property_type">
 <span class="type">gchar</span> *</td>
 <td class="property_name"><a class="link" href="FlatpakRef.html#FlatpakRef--branch" title="The “branch” property">branch</a></td>
-<td class="property_flags">Read / Write / Construct Only</td>
+<td class="property_flags">Read / Write / Construct Only</td>
 </tr>
 <tr>
 <td class="property_type">
 <span class="type">gchar</span> *</td>
 <td class="property_name"><a class="link" href="FlatpakRef.html#FlatpakRef--collection-id" title="The “collection-id” property">collection-id</a></td>
-<td class="property_flags">Read / Write / Construct Only</td>
+<td class="property_flags">Read / Write / Construct Only</td>
 </tr>
 <tr>
 <td class="property_type">
 <span class="type">gchar</span> *</td>
 <td class="property_name"><a class="link" href="FlatpakRef.html#FlatpakRef--commit" title="The “commit” property">commit</a></td>
-<td class="property_flags">Read / Write / Construct Only</td>
+<td class="property_flags">Read / Write / Construct Only</td>
 </tr>
 <tr>
 <td class="property_type"><a class="link" href="FlatpakRef.html#FlatpakRefKind" title="enum FlatpakRefKind"><span class="type">FlatpakRefKind</span></a></td>
 <td class="property_name"><a class="link" href="FlatpakRef.html#FlatpakRef--kind" title="The “kind” property">kind</a></td>
-<td class="property_flags">Read / Write / Construct Only</td>
+<td class="property_flags">Read / Write / Construct Only</td>
 </tr>
 <tr>
 <td class="property_type">
 <span class="type">gchar</span> *</td>
 <td class="property_name"><a class="link" href="FlatpakRef.html#FlatpakRef--name" title="The “name” property">name</a></td>
-<td class="property_flags">Read / Write / Construct Only</td>
+<td class="property_flags">Read / Write / Construct Only</td>
 </tr>
 </tbody>
 </table></div>
@@ -154,8 +154,8 @@
 <a name="FlatpakRef.other"></a><h2>Types and Values</h2>
 <div class="informaltable"><table class="informaltable" width="100%" border="0">
 <colgroup>
-<col width="150px" class="name">
-<col class="description">
+<col width="150px" class="other_proto_type">
+<col class="other_proto_name">
 </colgroup>
 <tbody>
 <tr>
@@ -181,7 +181,7 @@
 </div>
 <div class="refsect1">
 <a name="FlatpakRef.description"></a><h2>Description</h2>
-<p>Currently flatpak manages two types of binary artifacts: applications, and
+<p>Currently Flatpak manages two types of binary artifacts: applications, and
 runtimes. Applications contain a program that desktop users can run, while
 runtimes contain only libraries and data. An FlatpakRef object (or short: ref)
 can refer to either of these.</p>
@@ -189,6 +189,7 @@ can refer to either of these.</p>
 name, arch and branch, e.g. app/org.gnome.evince/x86_64/master. The functions
 <a class="link" href="FlatpakRef.html#flatpak-ref-parse" title="flatpak_ref_parse ()"><code class="function">flatpak_ref_parse()</code></a> and <a class="link" href="FlatpakRef.html#flatpak-ref-format-ref" title="flatpak_ref_format_ref ()"><code class="function">flatpak_ref_format_ref()</code></a> can be used to convert
 FlatpakRef objects into this string representation and back.</p>
+<p>FlatpakRef objects are immutable and can be passed freely between threads.</p>
 <p>To uniquely identify a particular version of an application or runtime, you
 need a commit.</p>
 <p>The subclasses <a class="link" href="FlatpakInstalledRef.html" title="FlatpakInstalledRef"><span class="type">FlatpakInstalledRef</span></a> and <a class="link" href="FlatpakRemoteRef.html" title="FlatpakRemoteRef"><span class="type">FlatpakRemoteRef</span></a> provide more information
@@ -465,7 +466,8 @@ commit set) or fail if the ref is invalid somehow.</p>
 <a name="FlatpakRef--arch"></a><h3>The <code class="literal">“arch”</code> property</h3>
 <pre class="programlisting">  “arch”                     <span class="type">gchar</span> *</pre>
 <p>The architecture of the application or runtime.</p>
-<p>Flags: Read / Write / Construct Only</p>
+<p>Owner: FlatpakRef</p>
+<p>Flags: Read / Write / Construct Only</p>
 <p>Default value: NULL</p>
 </div>
 <hr>
@@ -473,7 +475,8 @@ commit set) or fail if the ref is invalid somehow.</p>
 <a name="FlatpakRef--branch"></a><h3>The <code class="literal">“branch”</code> property</h3>
 <pre class="programlisting">  “branch”                   <span class="type">gchar</span> *</pre>
 <p>The branch of the application or runtime.</p>
-<p>Flags: Read / Write / Construct Only</p>
+<p>Owner: FlatpakRef</p>
+<p>Flags: Read / Write / Construct Only</p>
 <p>Default value: NULL</p>
 </div>
 <hr>
@@ -481,7 +484,8 @@ commit set) or fail if the ref is invalid somehow.</p>
 <a name="FlatpakRef--collection-id"></a><h3>The <code class="literal">“collection-id”</code> property</h3>
 <pre class="programlisting">  “collection-id”            <span class="type">gchar</span> *</pre>
 <p>The collection ID.</p>
-<p>Flags: Read / Write / Construct Only</p>
+<p>Owner: FlatpakRef</p>
+<p>Flags: Read / Write / Construct Only</p>
 <p>Default value: NULL</p>
 </div>
 <hr>
@@ -489,7 +493,8 @@ commit set) or fail if the ref is invalid somehow.</p>
 <a name="FlatpakRef--commit"></a><h3>The <code class="literal">“commit”</code> property</h3>
 <pre class="programlisting">  “commit”                   <span class="type">gchar</span> *</pre>
 <p>The commit.</p>
-<p>Flags: Read / Write / Construct Only</p>
+<p>Owner: FlatpakRef</p>
+<p>Flags: Read / Write / Construct Only</p>
 <p>Default value: NULL</p>
 </div>
 <hr>
@@ -497,7 +502,8 @@ commit set) or fail if the ref is invalid somehow.</p>
 <a name="FlatpakRef--kind"></a><h3>The <code class="literal">“kind”</code> property</h3>
 <pre class="programlisting">  “kind”                     <a class="link" href="FlatpakRef.html#FlatpakRefKind" title="enum FlatpakRefKind"><span class="type">FlatpakRefKind</span></a></pre>
 <p>The kind of artifact.</p>
-<p>Flags: Read / Write / Construct Only</p>
+<p>Owner: FlatpakRef</p>
+<p>Flags: Read / Write / Construct Only</p>
 <p>Default value: FLATPAK_REF_KIND_APP</p>
 </div>
 <hr>
@@ -505,12 +511,13 @@ commit set) or fail if the ref is invalid somehow.</p>
 <a name="FlatpakRef--name"></a><h3>The <code class="literal">“name”</code> property</h3>
 <pre class="programlisting">  “name”                     <span class="type">gchar</span> *</pre>
 <p>The name of the application or runtime.</p>
-<p>Flags: Read / Write / Construct Only</p>
+<p>Owner: FlatpakRef</p>
+<p>Flags: Read / Write / Construct Only</p>
 <p>Default value: NULL</p>
 </div>
 </div>
 </div>
 <div class="footer">
-<hr>Generated by GTK-Doc V1.28.1</div>
+<hr>Generated by GTK-Doc V1.32.1</div>
 </body>
 </html>

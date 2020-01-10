@@ -91,6 +91,8 @@ gboolean flatpak_extension_matches_reason (const char *extension_id,
 
 const char * flatpak_get_bwrap (void);
 
+char *flatpak_get_timezone (void);
+
 char **flatpak_subpaths_merge (char **subpaths1,
                                char **subpaths2);
 
@@ -218,6 +220,11 @@ GFile * flatpak_find_unmaintained_extension_dir_if_exists (const char   *name,
                                                            const char   *arch,
                                                            const char   *branch,
                                                            GCancellable *cancellable);
+FlatpakDeploy * flatpak_find_deploy_for_ref_in (GPtrArray    *dirs,
+                                                const char   *ref,
+                                                const char   *commit,
+                                                GCancellable *cancellable,
+                                                GError      **error);
 FlatpakDeploy * flatpak_find_deploy_for_ref (const char   *ref,
                                              const char   *commit,
                                              GCancellable *cancellable,
@@ -486,6 +493,10 @@ gboolean flatpak_mkdir_p (GFile        *dir,
 gboolean flatpak_rm_rf (GFile        *dir,
                         GCancellable *cancellable,
                         GError      **error);
+
+gboolean flatpak_canonicalize_permissions (int           parent_dfd,
+                                           const char   *rel_path,
+                                           GError      **error);
 
 char * flatpak_readlink (const char *path,
                          GError    **error);

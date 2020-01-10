@@ -27,7 +27,7 @@
 #include "flatpak-run-private.h"
 #include "valgrind-private.h"
 
-#include <glib/gi18n.h>
+#include <glib/gi18n-lib.h>
 
 #include <string.h>
 #include <stdlib.h>
@@ -60,6 +60,14 @@ static const GDBusErrorEntry flatpak_error_entries[] = {
   {FLATPAK_ERROR_REMOTE_NOT_FOUND,      "org.freedesktop.Flatpak.Error.RemoteNotFound"}, /* Since: 1.0 */
   {FLATPAK_ERROR_RUNTIME_NOT_FOUND,     "org.freedesktop.Flatpak.Error.RuntimeNotFound"}, /* Since: 1.0 */
   {FLATPAK_ERROR_DOWNGRADE,             "org.freedesktop.Flatpak.Error.Downgrade"}, /* Since: 1.0 */
+  {FLATPAK_ERROR_INVALID_REF,           "org.freedesktop.Flatpak.Error.InvalidRef"}, /* Since: 1.0.3 */
+  {FLATPAK_ERROR_INVALID_DATA,          "org.freedesktop.Flatpak.Error.InvalidData"}, /* Since: 1.0.3 */
+  {FLATPAK_ERROR_UNTRUSTED,             "org.freedesktop.Flatpak.Error.Untrusted"}, /* Since: 1.0.3 */
+  {FLATPAK_ERROR_SETUP_FAILED,          "org.freedesktop.Flatpak.Error.SetupFailed"}, /* Since: 1.0.3 */
+  {FLATPAK_ERROR_EXPORT_FAILED,         "org.freedesktop.Flatpak.Error.ExportFailed"}, /* Since: 1.0.3 */
+  {FLATPAK_ERROR_REMOTE_USED,           "org.freedesktop.Flatpak.Error.RemoteUsed"}, /* Since: 1.0.3 */
+  {FLATPAK_ERROR_RUNTIME_USED,          "org.freedesktop.Flatpak.Error.RuntimeUsed"}, /* Since: 1.0.3 */
+  {FLATPAK_ERROR_INVALID_NAME,          "org.freedesktop.Flatpak.Error.InvalidName"}, /* Since: 1.0.3 */
 };
 
 typedef struct archive FlatpakAutoArchiveRead;
@@ -638,6 +646,46 @@ flatpak_migrate_from_xdg_app (void)
     }
 }
 
+char *
+flatpak_get_timezone (void)
+{
+  g_autofree gchar *symlink = NULL;
+  gchar *etc_timezone = NULL;
+  const gchar *tzdir;
+
+  tzdir = getenv ("TZDIR");
+  if (tzdir == NULL)
+    tzdir = "/usr/share/zoneinfo";
+
+  symlink = flatpak_resolve_link ("/etc/localtime", NULL);
+  if (symlink != NULL)
+    {
+      /* Resolve relative path */
+      g_autofree gchar *canonical = flatpak_canonicalize_filename (symlink);
+      char *canonical_suffix;
+
+      /* Strip the prefix and slashes if possible. */
+      if (g_str_has_prefix (canonical, tzdir))
+        {
+          canonical_suffix = canonical + strlen (tzdir);
+          while (*canonical_suffix == '/')
+            canonical_suffix++;
+
+          return g_strdup (canonical_suffix);
+        }
+    }
+
+  if (g_file_get_contents ("/etc/timezeone", &etc_timezone,
+                           NULL, NULL))
+    {
+      g_strchomp (etc_timezone);
+      return etc_timezone;
+    }
+
+  /* Final fall-back is UTC */
+  return g_strdup ("UTC");
+ }
+
 static gboolean
 is_valid_initial_name_character (gint c, gboolean allow_dash)
 {
@@ -701,15 +749,15 @@ flatpak_is_valid_name (const char *string,
   len = strlen (string);
   if (G_UNLIKELY (len == 0))
     {
-      g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                           "Name can't be empty");
+      flatpak_fail_error (error, FLATPAK_ERROR_INVALID_NAME,
+                          _("Name can't be empty"));
       goto out;
     }
 
   if (G_UNLIKELY (len > 255))
     {
-      g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                           "Name can't be longer than 255 characters");
+      flatpak_fail_error (error, FLATPAK_ERROR_INVALID_NAME,
+                          _("Name can't be longer than 255 characters"));
       goto out;
     }
 
@@ -721,14 +769,14 @@ flatpak_is_valid_name (const char *string,
   s = string;
   if (G_UNLIKELY (*s == '.'))
     {
-      g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                           "Name can't start with a period");
+      flatpak_fail_error (error, FLATPAK_ERROR_INVALID_NAME,
+                          _("Name can't start with a period"));
       goto out;
     }
   else if (G_UNLIKELY (!is_valid_initial_name_character (*s, last_element)))
     {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Name can't start with %c", *s);
+      flatpak_fail_error (error, FLATPAK_ERROR_INVALID_NAME,
+                          _("Name can't start with %c"), *s);
       goto out;
     }
 
@@ -743,18 +791,18 @@ flatpak_is_valid_name (const char *string,
           s += 1;
           if (G_UNLIKELY (s == end))
             {
-              g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                                   "Name can't end with a period");
+              flatpak_fail_error (error, FLATPAK_ERROR_INVALID_NAME,
+                                  _("Name can't end with a period"));
               goto out;
             }
           if (!is_valid_initial_name_character (*s, last_element))
             {
               if (*s == '-')
-                g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                             "Only last name segment can contain -");
+                flatpak_fail_error (error, FLATPAK_ERROR_INVALID_NAME,
+                                    _("Only last name segment can contain -"));
               else
-                g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                             "Name segment can't start with %c", *s);
+                flatpak_fail_error (error, FLATPAK_ERROR_INVALID_NAME,
+                                    _("Name segment can't start with %c"), *s);
               goto out;
             }
           dot_count++;
@@ -762,11 +810,11 @@ flatpak_is_valid_name (const char *string,
       else if (G_UNLIKELY (!is_valid_name_character (*s, last_element)))
         {
           if (*s == '-')
-            g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                         "Only last name segment can contain -");
+            flatpak_fail_error (error, FLATPAK_ERROR_INVALID_NAME,
+                                _("Only last name segment can contain -"));
           else
-            g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                         "Name can't contain %c", *s);
+            flatpak_fail_error (error, FLATPAK_ERROR_INVALID_NAME,
+                                _("Name can't contain %c"), *s);
           goto out;
         }
       s += 1;
@@ -774,8 +822,8 @@ flatpak_is_valid_name (const char *string,
 
   if (G_UNLIKELY (dot_count < 2))
     {
-      g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                           "Names must contain at least 2 periods");
+      flatpak_fail_error (error, FLATPAK_ERROR_INVALID_NAME,
+                          _("Names must contain at least 2 periods"));
       goto out;
     }
 
@@ -863,7 +911,7 @@ flatpak_get_allowed_exports (const char     *source_path,
 
   g_ptr_array_add (allowed_prefixes, g_strdup_printf ("%s.*", app_id));
 
-  if (flatpak_has_path_prefix (source_path, "share/applications"))
+  if (strcmp (source_path, "share/applications") == 0)
     {
       g_ptr_array_add (allowed_extensions, g_strdup (".desktop"));
     }
@@ -874,7 +922,7 @@ flatpak_get_allowed_exports (const char     *source_path,
       g_ptr_array_add (allowed_extensions, g_strdup (".svg"));
       g_ptr_array_add (allowed_extensions, g_strdup (".ico"));
     }
-  else if (flatpak_has_path_prefix (source_path, "share/dbus-1/services"))
+  else if (strcmp (source_path, "share/dbus-1/services") == 0)
     {
       g_auto(GStrv) owned_dbus_names =  flatpak_context_get_session_bus_policy_allowed_own_names (context);
 
@@ -887,11 +935,11 @@ flatpak_get_allowed_exports (const char     *source_path,
        * and we can *only* match exactly these */
       require_exact_match = TRUE;
     }
-  else if (flatpak_has_path_prefix (source_path, "share/gnome-shell/search-providers"))
+  else if (strcmp (source_path, "share/gnome-shell/search-providers") == 0)
     {
       g_ptr_array_add (allowed_extensions, g_strdup (".ini"));
     }
-  else if (flatpak_has_path_prefix (source_path, "share/mime/packages"))
+  else if (strcmp (source_path, "share/mime/packages") == 0)
     {
       g_ptr_array_add (allowed_extensions, g_strdup (".xml"));
     }
@@ -964,8 +1012,8 @@ flatpak_is_valid_branch (const char *string,
   len = strlen (string);
   if (G_UNLIKELY (len == 0))
     {
-      g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                           "Branch can't be empty");
+      flatpak_fail_error (error, FLATPAK_ERROR_INVALID_NAME, 
+                          _("Branch can't be empty"));
       goto out;
     }
 
@@ -974,8 +1022,8 @@ flatpak_is_valid_branch (const char *string,
   s = string;
   if (G_UNLIKELY (!is_valid_initial_branch_character (*s)))
     {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Branch can't start with %c", *s);
+      flatpak_fail_error (error, FLATPAK_ERROR_INVALID_NAME, 
+                          _("Branch can't start with %c"), *s);
       goto out;
     }
 
@@ -984,8 +1032,8 @@ flatpak_is_valid_branch (const char *string,
     {
       if (G_UNLIKELY (!is_valid_branch_character (*s)))
         {
-          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                       "Branch can't contain %c", *s);
+          flatpak_fail_error (error, FLATPAK_ERROR_INVALID_NAME, 
+                              _("Branch can't contain %c"), *s);
           goto out;
         }
       s += 1;
@@ -1036,31 +1084,31 @@ flatpak_decompose_ref (const char *full_ref,
   parts = g_strsplit (full_ref, "/", 0);
   if (g_strv_length (parts) != 4)
     {
-      flatpak_fail (error, "Wrong number of components in %s", full_ref);
+      flatpak_fail_error (error, FLATPAK_ERROR_INVALID_REF, _("Wrong number of components in %s"), full_ref);
       return NULL;
     }
 
   if (strcmp (parts[0], "app") != 0 && strcmp (parts[0], "runtime") != 0)
     {
-      flatpak_fail (error, "Not application or runtime");
+      flatpak_fail_error (error, FLATPAK_ERROR_INVALID_REF, _("%s is not application or runtime"), full_ref);
       return NULL;
     }
 
   if (!flatpak_is_valid_name (parts[1], &local_error))
     {
-      flatpak_fail (error, "Invalid name %s: %s", parts[1], local_error->message);
+      flatpak_fail_error (error, FLATPAK_ERROR_INVALID_REF, _("Invalid name %s: %s"), parts[1], local_error->message);
       return NULL;
     }
 
   if (strlen (parts[2]) == 0)
     {
-      flatpak_fail (error, "Invalid arch %s", parts[2]);
+      flatpak_fail_error (error, FLATPAK_ERROR_INVALID_REF, _("Invalid arch %s"), parts[2]);
       return NULL;
     }
 
   if (!flatpak_is_valid_branch (parts[3], &local_error))
     {
-      flatpak_fail (error, "Invalid branch %s: %s", parts[3], local_error->message);
+      flatpak_fail_error (error, FLATPAK_ERROR_INVALID_REF, _("Invalid branch %s: %s"), parts[3], local_error->message);
       return NULL;
     }
 
@@ -1148,7 +1196,7 @@ _flatpak_split_partial_ref_arg (const char   *partial_ref,
   id = g_strndup (id_start, id_end - id_start);
 
   if (validate && !flatpak_is_valid_name (id, &local_error))
-    return flatpak_fail (error, "Invalid id %s: %s", id, local_error->message);
+    return flatpak_fail_error (error, FLATPAK_ERROR_INVALID_REF, _("Invalid id %s: %s"), id, local_error->message);
 
   arch_start = partial_ref;
   arch_end = next_element (&partial_ref);
@@ -1165,7 +1213,7 @@ _flatpak_split_partial_ref_arg (const char   *partial_ref,
     branch = g_strdup (default_branch);
 
   if (validate && branch != NULL && !flatpak_is_valid_branch (branch, &local_error))
-    return flatpak_fail (error, "Invalid branch %s: %s", branch, local_error->message);
+    return flatpak_fail_error (error, FLATPAK_ERROR_INVALID_REF, _("Invalid branch %s: %s"), branch, local_error->message);
 
   if (out_kinds)
     *out_kinds = kinds;
@@ -1236,13 +1284,13 @@ flatpak_compose_ref (gboolean    app,
 
   if (!flatpak_is_valid_name (name, &local_error))
     {
-      flatpak_fail (error, "'%s' is not a valid name: %s", name, local_error->message);
+      flatpak_fail_error (error, FLATPAK_ERROR_INVALID_REF, _("'%s' is not a valid name: %s"), name, local_error->message);
       return NULL;
     }
 
   if (branch && !flatpak_is_valid_branch (branch, &local_error))
     {
-      flatpak_fail (error, "'%s' is not a valid branch name: %s", branch, local_error->message);
+      flatpak_fail_error (error, FLATPAK_ERROR_INVALID_REF, _("'%s' is not a valid branch name: %s"), branch, local_error->message);
       return NULL;
     }
 
@@ -1431,7 +1479,7 @@ flatpak_find_deploy_dir_for_ref (const char   *ref,
 
   if (deploy == NULL)
     {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, _("%s not installed"), ref);
+      flatpak_fail_error (error, FLATPAK_ERROR_NOT_INSTALLED, _("%s not installed"), ref);
       return NULL;
     }
 
@@ -1525,9 +1573,34 @@ flatpak_find_current_ref (const char   *app_id,
   if (current_ref)
     return g_steal_pointer (&current_ref);
 
-  g_set_error (error, FLATPAK_ERROR, FLATPAK_ERROR_NOT_INSTALLED,
-               _("%s not installed"), app_id);
+  flatpak_fail_error (error, FLATPAK_ERROR_NOT_INSTALLED, _("%s not installed"), app_id);
   return NULL;
+}
+
+FlatpakDeploy *
+flatpak_find_deploy_for_ref_in (GPtrArray    *dirs,
+                                const char   *ref,
+                                const char   *commit,
+                                GCancellable *cancellable,
+                                GError      **error)
+{
+  FlatpakDeploy *deploy = NULL;
+  int i;
+  g_autoptr(GError) my_error = NULL;
+
+  for (i = 0; deploy == NULL && i < dirs->len; i++)
+    {
+      FlatpakDir *dir = g_ptr_array_index (dirs, i);
+ 
+      flatpak_log_dir_access (dir);
+      g_clear_error (&my_error);
+      deploy = flatpak_dir_load_deployed (dir, ref, commit, cancellable, &my_error);
+    }
+
+  if (deploy == NULL)
+    g_propagate_error (error, g_steal_pointer (&my_error));
+
+  return deploy;
 }
 
 FlatpakDeploy *
@@ -1536,37 +1609,15 @@ flatpak_find_deploy_for_ref (const char   *ref,
                              GCancellable *cancellable,
                              GError      **error)
 {
-  g_autoptr(FlatpakDir) user_dir = NULL;
-  g_autoptr(GPtrArray) system_dirs = NULL;
-  g_autoptr(FlatpakDeploy) deploy = NULL;
-  g_autoptr(GError) my_error = NULL;
+  g_autoptr(GPtrArray) dirs = NULL;
 
-  user_dir = flatpak_dir_get_user ();
-  flatpak_log_dir_access (user_dir);
-  system_dirs = flatpak_dir_get_system_list (cancellable, error);
-  if (system_dirs == NULL)
+  dirs = flatpak_dir_get_system_list (cancellable, error);
+  if (dirs == NULL)
     return NULL;
 
-  deploy = flatpak_dir_load_deployed (user_dir, ref, commit, cancellable, &my_error);
-  if (deploy == NULL &&
-      system_dirs->len > 0 &&
-      g_error_matches (my_error, FLATPAK_ERROR, FLATPAK_ERROR_NOT_INSTALLED))
-    {
-      int i;
+  g_ptr_array_insert (dirs, 0, flatpak_dir_get_user ());
 
-      for (i = 0; deploy == NULL && i < system_dirs->len; i++)
-        {
-          FlatpakDir *system_dir = g_ptr_array_index (system_dirs, i);
-
-          flatpak_log_dir_access (system_dir);
-          g_clear_error (&my_error);
-          deploy = flatpak_dir_load_deployed (system_dir, ref, commit, cancellable, &my_error);
-        }
-    }
-  if (deploy == NULL)
-    g_propagate_error (error, g_steal_pointer (&my_error));
-
-  return g_steal_pointer (&deploy);
+  return flatpak_find_deploy_for_ref_in (dirs, ref, commit, cancellable, error);
 }
 
 static gboolean
@@ -2042,13 +2093,18 @@ out:
   return ret;
 }
 
-gboolean
-flatpak_zero_mtime (int           parent_dfd,
-                    const char   *rel_path,
-                    GCancellable *cancellable,
-                    GError      **error)
+static gboolean
+_flatpak_canonicalize_permissions (int           parent_dfd,
+                                   const char   *rel_path,
+                                   gboolean      toplevel,
+                                   GError      **error)
 {
   struct stat stbuf;
+  gboolean res = TRUE;
+
+  /* Note, in order to not leave non-canonical things around in case
+   * of error, this continues after errors, but returns the first
+   * error. */
 
   if (TEMP_FAILURE_RETRY (fstatat (parent_dfd, rel_path, &stbuf, AT_SYMLINK_NOFOLLOW)) != 0)
     {
@@ -2059,43 +2115,84 @@ flatpak_zero_mtime (int           parent_dfd,
   if (S_ISDIR (stbuf.st_mode))
     {
       g_auto(GLnxDirFdIterator) dfd_iter = { 0, };
-      gboolean inited;
 
-      inited = glnx_dirfd_iterator_init_at (parent_dfd, rel_path, FALSE, &dfd_iter, NULL);
-
-      while (inited)
-        {
-          struct dirent *dent;
-
-          if (!glnx_dirfd_iterator_next_dent (&dfd_iter, &dent, NULL, NULL) || dent == NULL)
-            break;
-
-          if (!flatpak_zero_mtime (dfd_iter.fd, dent->d_name,
-                                   cancellable, error))
-            return FALSE;
-        }
-
-      /* Update stbuf */
-      if (TEMP_FAILURE_RETRY (fstat (dfd_iter.fd, &stbuf)) != 0)
+      /* For the toplevel we set to 0700 so we can modify it, but not
+         expose any non-canonical files to any other user, then we set
+         it to 0755 afterwards. */
+      if (fchmodat (parent_dfd, rel_path, toplevel ? 0700 : 0755, 0) != 0)
         {
           glnx_set_error_from_errno (error);
-          return FALSE;
+          error = NULL;
+          res = FALSE;
         }
-    }
 
-  /* OSTree checks out to mtime 0, so we do the same */
-  if (stbuf.st_mtime != OSTREE_TIMESTAMP)
+      if (glnx_dirfd_iterator_init_at (parent_dfd, rel_path, FALSE, &dfd_iter, NULL))
+        {
+          while (TRUE)
+            {
+              struct dirent *dent;
+
+              if (!glnx_dirfd_iterator_next_dent (&dfd_iter, &dent, NULL, NULL) || dent == NULL)
+                break;
+
+              if (!_flatpak_canonicalize_permissions (dfd_iter.fd, dent->d_name, FALSE, error))
+                {
+                  error = NULL;
+                  res = FALSE;
+                }
+            }
+        }
+
+      if (toplevel &&
+          fchmodat (parent_dfd, rel_path, 0755, 0) != 0)
+        {
+          glnx_set_error_from_errno (error);
+          error = NULL;
+          res = FALSE;
+        }
+
+        return res;
+    }
+  else if (S_ISREG(stbuf.st_mode))
     {
-      const struct timespec times[2] = { { 0, UTIME_OMIT }, { OSTREE_TIMESTAMP, } };
+      mode_t mode;
 
-      if (TEMP_FAILURE_RETRY (utimensat (parent_dfd, rel_path, times, AT_SYMLINK_NOFOLLOW)) != 0)
+      /* If use can execute, make executable by all */
+      if (stbuf.st_mode & S_IXUSR)
+        mode = 0755;
+      else /* otherwise executable by none */
+        mode = 0644;
+
+      if (fchmodat (parent_dfd, rel_path, mode, 0) != 0)
         {
           glnx_set_error_from_errno (error);
-          return FALSE;
+          res = FALSE;
+        }
+    }
+  else if (S_ISLNK(stbuf.st_mode))
+    {
+      /* symlinks have no permissions */
+    }
+  else
+    {
+      /* some weird non-canonical type, lets delete it */
+      if (unlinkat(parent_dfd, rel_path, 0) != 0)
+        {
+          glnx_set_error_from_errno (error);
+          res = FALSE;
         }
     }
 
-  return TRUE;
+  return res;
+}
+
+/* Canonicalizes files to the same permissions as bare-user-only checkouts */
+gboolean
+flatpak_canonicalize_permissions (int           parent_dfd,
+                                  const char   *rel_path,
+                                  GError      **error)
+{
+  return _flatpak_canonicalize_permissions (parent_dfd, rel_path, TRUE, error);
 }
 
 /* Make a directory, and its parent. Don't error if it already exists.
@@ -2941,11 +3038,12 @@ populate_commit_data_cache (GVariant   *metadata,
  * but kept for backwards compatibility).
  *
  * Note that there are two keys for the collection ID: collection-id, and
- * xa.collection-id. If a client does not currently have a collection ID configured
- * for this remote, it will *only* update its configuration from xa.collection-id.
- * This allows phased deployment of collection-based repositories. Clients will
- * only update their configuration from an unset to a set collection ID once
- * (otherwise the security properties of collection IDs are broken). */
+ * ostree.deploy-collection-id. If a client does not currently have a
+ * collection ID configured for this remote, it will *only* update its
+ * configuration from ostree.deploy-collection-id.  This allows phased
+ * deployment of collection-based repositories. Clients will only update their
+ * configuration from an unset to a set collection ID once (otherwise the
+ * security properties of collection IDs are broken). */
 gboolean
 flatpak_repo_update (OstreeRepo   *repo,
                      const char  **gpg_key_ids,
@@ -2965,7 +3063,7 @@ flatpak_repo_update (OstreeRepo   *repo,
   g_autoptr(GVariant) old_summary = NULL;
   g_autoptr(GVariant) new_summary = NULL;
   g_autoptr(GHashTable) refs = NULL;
-  const char *prefixes[] = { "appstream", "app", "runtime", NULL };
+  const char *prefixes[] = { "appstream", "appstream2", "app", "runtime", NULL };
   const char **prefix;
   g_autoptr(GList) ordered_keys = NULL;
   GList *l = NULL;
@@ -3002,8 +3100,13 @@ flatpak_repo_update (OstreeRepo   *repo,
     g_variant_builder_add (&builder, "{sv}", "xa.default-branch",
                            g_variant_new_string (default_branch));
 
+/* FIXME: Remove this check when we depend on ostree 2018.9 */
+#ifndef OSTREE_META_KEY_DEPLOY_COLLECTION_ID
+#define OSTREE_META_KEY_DEPLOY_COLLECTION_ID "ostree.deploy-collection-id"
+#endif
+
   if (deploy_collection_id && collection_id != NULL)
-    g_variant_builder_add (&builder, "{sv}", "xa.collection-id",
+    g_variant_builder_add (&builder, "{sv}", OSTREE_META_KEY_DEPLOY_COLLECTION_ID,
                            g_variant_new_string (collection_id));
   else if (deploy_collection_id)
     g_debug ("Ignoring deploy-collection-id=true because no collection ID is set.");
@@ -4638,7 +4741,7 @@ flatpak_bundle_load (GFile   *file,
     {
       if (!g_variant_lookup (metadata, "ref", "s", ref))
         {
-          flatpak_fail (error, "Invalid bundle, no ref in metadata");
+          flatpak_fail_error (error, FLATPAK_ERROR_INVALID_DATA, _("Invalid bundle, no ref in metadata"));
           return NULL;
         }
     }
@@ -4730,7 +4833,7 @@ flatpak_pull_from_bundle (OstreeRepo   *repo,
 
   if (remote_collection_id != NULL && collection_id != NULL &&
       strcmp (remote_collection_id, collection_id) != 0)
-    return flatpak_fail (error, "Collection ‘%s’ of bundle doesn’t match collection ‘%s’ of remote",
+    return flatpak_fail_error (error, FLATPAK_ERROR_INVALID_DATA, _("Collection ‘%s’ of bundle doesn’t match collection ‘%s’ of remote"),
                          collection_id, remote_collection_id);
 
   if (!ostree_repo_prepare_transaction (repo, NULL, cancellable, error))
@@ -4770,7 +4873,7 @@ flatpak_pull_from_bundle (OstreeRepo   *repo,
          trust the source bundle. */
       if (ostree_gpg_verify_result_count_valid (gpg_result) == 0  &&
           require_gpg_signature)
-        return flatpak_fail (error, "GPG signatures found, but none are in trusted keyring");
+        return flatpak_fail_error (error, FLATPAK_ERROR_UNTRUSTED, _("GPG signatures found, but none are in trusted keyring"));
     }
 
   if (!ostree_repo_read_commit (repo, to_checksum, &root, NULL, NULL, error))
@@ -4809,7 +4912,7 @@ flatpak_pull_from_bundle (OstreeRepo   *repo,
     {
       /* Immediately remove this broken commit */
       ostree_repo_set_ref_immediate (repo, remote, ref, NULL, cancellable, error);
-      return flatpak_fail (error, "Metadata in header and app are inconsistent");
+      return flatpak_fail_error (error, FLATPAK_ERROR_INVALID_DATA, _("Metadata in header and app are inconsistent"));
     }
 
   return TRUE;
@@ -4864,11 +4967,7 @@ flatpak_mirror_image_from_oci (FlatpakOciRegistry    *dst_registry,
     return FALSE;
 
   if (!FLATPAK_IS_OCI_MANIFEST (versioned))
-    {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
-                   "Image is not a manifest");
-      return FALSE;
-    }
+    return flatpak_fail_error (error, FLATPAK_ERROR_INVALID_DATA, _("Image is not a manifest"));
 
   manifest = FLATPAK_OCI_MANIFEST (versioned);
 
@@ -4960,13 +5059,13 @@ flatpak_pull_from_oci (OstreeRepo            *repo,
                                           metadata_builder);
   if (manifest_ref == NULL)
     {
-      flatpak_fail (error, "No ref specified for OCI image %s", digest);
+      flatpak_fail_error (error, FLATPAK_ERROR_INVALID_DATA, _("No ref specified for OCI image %s"), digest);
       return NULL;
     }
 
   if (strcmp (manifest_ref, ref) != 0)
     {
-      flatpak_fail (error, "Wrong ref (%s) specified for OCI image %s, expected %s", manifest_ref, digest, ref);
+      flatpak_fail_error (error, FLATPAK_ERROR_INVALID_DATA, _("Wrong ref (%s) specified for OCI image %s, expected %s"), manifest_ref, digest, ref);
       return NULL;
     }
 
@@ -5035,7 +5134,7 @@ flatpak_pull_from_oci (OstreeRepo            *repo,
       if (!g_str_has_prefix (layer->digest, "sha256:") ||
           strcmp (layer->digest + strlen ("sha256:"), layer_checksum) != 0)
         {
-          flatpak_fail (error, "Wrong layer checksum, expected %s, was %s", layer->digest, layer_checksum);
+          flatpak_fail_error (error, FLATPAK_ERROR_INVALID_DATA, _("Wrong layer checksum, expected %s, was %s"), layer->digest, layer_checksum);
           goto error;
         }
 
@@ -5666,31 +5765,78 @@ flatpak_check_required_version (const char *ref,
                                 GKeyFile   *metakey,
                                 GError    **error)
 {
-  g_autofree char *required_version = NULL;
+  g_auto(GStrv) required_versions = NULL;
   const char *group;
-  int required_major, required_minor, required_micro;
+  int max_required_major = 0, max_required_minor = 0;
+  const char *max_required_version = "0.0";
+  int i;
 
   if (g_str_has_prefix (ref, "app/"))
     group = "Application";
   else
     group = "Runtime";
 
-  required_version = g_key_file_get_string (metakey, group, "required-flatpak", NULL);
-  if (required_version)
+  /* We handle handle multiple version requirements here. Each requirement must
+   * be in the form major.minor.micro, and if the flatpak version matches the
+   * major.minor part, t must be equal or later in the micro. If the major.minor part
+   * doesn't exactly match any of the specified requirements it must be larger
+   * than the maximum specified requirement.
+   *
+   * For example, specifying
+   *   required-flatpak=1.6.2;1.4.2;1.0.2;
+   * would allow flatpak versions:
+   *  1.7.0, 1.6.2, 1.6.3, 1.4.2, 1.4.3, 1.0.2, 1.0.3
+   * but not:
+   *  1.6.1, 1.4.1 or 1.2.100.
+   *
+   * The goal here is to be able to specify a version (like 1.6.2 above) where a feature
+   * was introduced, but also allow backports of said feature to earlier version series.
+   *
+   * Earlier versions that only support specifying one version will only look at the first
+   * element in the list, so put the largest version first.
+   */
+  required_versions = g_key_file_get_string_list (metakey, group, "required-flatpak", NULL, NULL);
+  if (required_versions == 0 || required_versions[0] == NULL)
+    return TRUE;
+
+  for (i = 0; required_versions[i] != NULL; i++)
     {
+      int required_major, required_minor, required_micro;
+      const char *required_version = required_versions[i];
+
       if (sscanf (required_version, "%d.%d.%d", &required_major, &required_minor, &required_micro) != 3)
-        g_warning ("Invalid require-flatpak argument %s", required_version);
+        return flatpak_fail_error (error, FLATPAK_ERROR_INVALID_DATA,
+                                   _("Invalid require-flatpak argument %s"), required_version);
       else
         {
-          if (required_major > PACKAGE_MAJOR_VERSION ||
-              (required_major == PACKAGE_MAJOR_VERSION && required_minor > PACKAGE_MINOR_VERSION) ||
-              (required_major == PACKAGE_MAJOR_VERSION && required_minor == PACKAGE_MINOR_VERSION && required_micro > PACKAGE_MICRO_VERSION))
+          /* If flatpak is in the same major.minor series as the requirement, do a micro check */
+          if (required_major == PACKAGE_MAJOR_VERSION && required_minor == PACKAGE_MINOR_VERSION)
             {
-              g_set_error (error, FLATPAK_ERROR, FLATPAK_ERROR_NEED_NEW_FLATPAK, _("%s needs a later flatpak version (%s)"), ref, required_version);
-              return FALSE;
+              if (required_micro <= PACKAGE_MICRO_VERSION)
+                return TRUE;
+              else
+                return flatpak_fail_error (error, FLATPAK_ERROR_NEED_NEW_FLATPAK,
+                                           _("%s needs a later flatpak version (%s)"),
+                                           ref, required_version);
+            }
+
+          /* Otherwise, keep track of the largest major.minor that is required */
+          if ((required_major > max_required_major) ||
+              (required_major == max_required_major &&
+               required_minor > max_required_minor))
+            {
+              max_required_major = required_major;
+              max_required_minor = required_minor;
+              max_required_version = required_version;
             }
         }
     }
+
+  if (max_required_major > PACKAGE_MAJOR_VERSION ||
+      (max_required_major == PACKAGE_MAJOR_VERSION && max_required_minor > PACKAGE_MINOR_VERSION))
+    return flatpak_fail_error (error, FLATPAK_ERROR_NEED_NEW_FLATPAK,
+                               _("%s needs a later flatpak version (%s)"),
+                               ref, max_required_version);
 
   return TRUE;
 }

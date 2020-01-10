@@ -52,6 +52,12 @@
             group are set according to the options.
         </para>
         <para>
+             As part of finalization you can also specify permissions that the
+             app needs, using the various options specified below. Additionally
+             during finalization the permissions from the runtime are inherited
+             into the app unless you specify <option>--no-inherit-permissions</option>
+        </para>
+        <para>
             You should review the exported files and the application metadata
             before creating and distributing an application bundle.
         </para>
@@ -171,7 +177,7 @@
                 <listitem><para>
                     Allow access to a specific feature. This updates
                     the [Context] group in the metadata.
-                    FEATURE must be one of: devel, multiarch, bluetooth.
+                    FEATURE must be one of: devel, multiarch, bluetooth, canbus.
                     This option can be used multiple times.
                  </para><para>
                     The <code>devel</code> feature allows the application to
@@ -187,6 +193,11 @@
                     The <code>bluetooth</code> feature allows the application to
                     use bluetooth (AF_BLUETOOTH) sockets. Note, for bluetooth to
                     fully work you must also have network access.
+                </para>
+                <para>
+                    The <code>canbus</code> feature allows the application to
+                    use canbus (AF_CAN) sockets.
+                    Note, for this work you must also have network access.
                 </para></listitem>
             </varlistentry>
 
@@ -196,7 +207,7 @@
                 <listitem><para>
                     Disallow access to a specific feature. This updates
                     the [Context] group in the metadata.
-                    FEATURE must be one of: devel, multiarch, bluetooth.
+                    FEATURE must be one of: devel, multiarch, bluetooth, canbus.
                     This option can be used multiple times.
                 </para></listitem>
             </varlistentry>
@@ -390,6 +401,14 @@ key=v1;v2;
 
                 <listitem><para>
                     Don't look for exports in the build.
+                </para></listitem>
+            </varlistentry>
+
+            <varlistentry>
+                <term><option>--no-inherit-permissions</option></term>
+
+                <listitem><para>
+                    Don't inherit runtime permissions in the app.
                 </para></listitem>
             </varlistentry>
 

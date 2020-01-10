@@ -53,6 +53,7 @@ typedef enum {
   FLATPAK_CONTEXT_FEATURE_DEVEL        = 1 << 0,
   FLATPAK_CONTEXT_FEATURE_MULTIARCH    = 1 << 1,
   FLATPAK_CONTEXT_FEATURE_BLUETOOTH    = 1 << 2,
+  FLATPAK_CONTEXT_FEATURE_CANBUS       = 1 << 3,
 } FlatpakContextFeatures;
 
 struct FlatpakContext
@@ -110,6 +111,7 @@ gboolean       flatpak_context_get_needs_session_bus_proxy (FlatpakContext *cont
 gboolean       flatpak_context_get_needs_system_bus_proxy (FlatpakContext *context);
 
 void           flatpak_context_reset_permissions (FlatpakContext *context);
+void           flatpak_context_reset_non_permissions (FlatpakContext *context);
 void           flatpak_context_make_sandboxed (FlatpakContext *context);
 
 gboolean       flatpak_context_allows_features (FlatpakContext        *context,

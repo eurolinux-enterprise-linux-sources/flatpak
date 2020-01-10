@@ -20,6 +20,8 @@
 
 #include "config.h"
 
+#include <glib/gi18n-lib.h>
+
 #include <string.h>
 
 #include <ostree.h>
@@ -42,6 +44,7 @@
  * SECTION:flatpak-installation
  * @Title: FlatpakInstallation
  * @Short_description: Installation information
+ * @See_also: FlatpakTransaction
  *
  * FlatpakInstallation is the toplevel object that software installers
  * should use to operate on an flatpak applications.
@@ -51,11 +54,16 @@
  * system-wide (in $prefix/var/lib/flatpak) or per-user (in ~/.local/share/flatpak).
  *
  * FlatpakInstallation can list configured remotes as well as installed application
- * and runtime references (in short: refs). It can also run, install, update and
- * uninstall applications and runtimes, using #FlatpakTransaction.
+ * and runtime references (in short: refs), and it can add, remove and modify remotes.
+ *
+ * FlatpakInstallation can also run, install, update and uninstall applications and
+ * runtimes, but #FlatpakTransaction is a better, high-level API for these tasks.
  *
  * To get a list of all configured installations, use flatpak_get_system_installations(),
  * together with flatpak_installation_new_user().
+ *
+ * The FlatpakInstallatio nAPI is threadsafe in the sense that it is safe to run two
+ * operations at the same time, in different threads (or processes).
  */
 
 typedef struct _FlatpakInstallationPrivate FlatpakInstallationPrivate;
@@ -739,8 +747,8 @@ flatpak_installation_get_installed_ref (FlatpakInstallation *self,
                                         ref, NULL, cancellable);
   if (deploy == NULL)
     {
-      g_set_error (error, FLATPAK_ERROR, FLATPAK_ERROR_NOT_INSTALLED,
-                   "Ref %s not installed", ref);
+      flatpak_fail_error (error, FLATPAK_ERROR_NOT_INSTALLED,
+                          _("Ref %s not installed"), ref);
       return NULL;
     }
 
@@ -781,8 +789,8 @@ flatpak_installation_get_current_installed_app (FlatpakInstallation *self,
 
   if (deploy == NULL)
     {
-      g_set_error (error, FLATPAK_ERROR, FLATPAK_ERROR_NOT_INSTALLED,
-                   "App %s not installed", name);
+      flatpak_fail_error (error, FLATPAK_ERROR_NOT_INSTALLED,
+                          _("App %s not installed"), name);
       return NULL;
     }
 
@@ -988,6 +996,7 @@ flatpak_installation_list_installed_refs_for_update (FlatpakInstallation *self,
       const char *remote_commit = g_hash_table_lookup (remote_commits, key);
       const char *local_commit = flatpak_installed_ref_get_latest_commit (installed_ref);
 
+      /* Note: local_commit may be NULL here */
       if (remote_commit != NULL &&
           g_strcmp0 (remote_commit, local_commit) != 0)
         g_ptr_array_add (updates, g_object_ref (installed_ref));
@@ -1068,28 +1077,30 @@ flatpak_installation_list_installed_refs_for_update (FlatpakInstallation *self,
           /* The ref_to_checksum map only tells us if this remote is offering
            * the latest commit of the available remotes; we have to check
            * ref_to_timestamp to know if the commit is an update or a
-           * downgrade.
+           * downgrade. If local_commit is NULL assume it's an update until
+           * proven otherwise.
            */
-          {
-            guint64 local_timestamp = 0;
-            guint64 *remote_timestamp;
-            g_autoptr(GVariant) commit_v = NULL;
+          if (local_commit != NULL)
+            {
+              guint64 local_timestamp = 0;
+              guint64 *remote_timestamp;
+              g_autoptr(GVariant) commit_v = NULL;
 
-            if (ostree_repo_load_commit (flatpak_dir_get_repo (dir), local_commit, &commit_v, NULL, NULL))
-              local_timestamp = ostree_commit_get_timestamp (commit_v);
+              if (ostree_repo_load_commit (flatpak_dir_get_repo (dir), local_commit, &commit_v, NULL, NULL))
+                local_timestamp = ostree_commit_get_timestamp (commit_v);
 
-            remote_timestamp = g_hash_table_lookup (results[j]->ref_to_timestamp, collection_ref);
-            *remote_timestamp = GUINT64_FROM_BE (*remote_timestamp);
+              remote_timestamp = g_hash_table_lookup (results[j]->ref_to_timestamp, collection_ref);
+              *remote_timestamp = GUINT64_FROM_BE (*remote_timestamp);
 
-            g_debug ("%s: Comparing local timestamp %" G_GUINT64_FORMAT " to remote timestamp %"
-                     G_GUINT64_FORMAT " on ref (%s, %s)", G_STRFUNC, local_timestamp, *remote_timestamp,
-                     collection_ref->collection_id, collection_ref->ref_name);
+              g_debug ("%s: Comparing local timestamp %" G_GUINT64_FORMAT " to remote timestamp %"
+                       G_GUINT64_FORMAT " on ref (%s, %s)", G_STRFUNC, local_timestamp, *remote_timestamp,
+                       collection_ref->collection_id, collection_ref->ref_name);
 
-            /* The timestamp could be 0 due to an error reading it. Assume
-             * it's an update until proven otherwise. */
-            if (*remote_timestamp != 0 && *remote_timestamp <= local_timestamp)
-              continue;
-          }
+              /* The timestamp could be 0 due to an error reading it. Assume
+               * it's an update until proven otherwise. */
+              if (*remote_timestamp != 0 && *remote_timestamp <= local_timestamp)
+                continue;
+            }
 
           g_ptr_array_add (updates, g_object_ref (installed_ref));
 
@@ -1537,7 +1548,7 @@ flatpak_installation_load_app_overrides (FlatpakInstallation *self,
                                          GError             **error)
 {
   g_autoptr(FlatpakDir) dir = NULL;
-  g_autofree char *metadata_contents = NULL;
+  char *metadata_contents;
   gsize metadata_size;
 
   dir = flatpak_installation_get_dir (self, error);
@@ -1723,9 +1734,8 @@ flatpak_installation_install_full (FlatpakInstallation    *self,
   deploy_dir = flatpak_dir_get_if_deployed (dir, ref, NULL, cancellable);
   if (deploy_dir != NULL)
     {
-      g_set_error (error,
-                   FLATPAK_ERROR, FLATPAK_ERROR_ALREADY_INSTALLED,
-                   "%s branch %s already installed", name, branch ? branch : "master");
+      flatpak_fail_error (error, FLATPAK_ERROR_ALREADY_INSTALLED,
+                          _("%s branch %s already installed"), name, branch ? branch : "master");
       return NULL;
     }
 
@@ -1755,7 +1765,8 @@ flatpak_installation_install_full (FlatpakInstallation    *self,
                             ostree_progress, cancellable, error))
     goto out;
 
-  if (g_str_has_prefix (ref, "app"))
+  if (!(flags & FLATPAK_INSTALL_FLAGS_NO_TRIGGERS) &&
+      g_str_has_prefix (ref, "app"))
     flatpak_dir_run_triggers (dir_clone, cancellable, NULL);
 
   /* Note that if the caller sets FLATPAK_INSTALL_FLAGS_NO_DEPLOY we must
@@ -1763,10 +1774,8 @@ flatpak_installation_install_full (FlatpakInstallation    *self,
    * always return an error. */
   if ((flags & FLATPAK_INSTALL_FLAGS_NO_DEPLOY) != 0)
     {
-      g_set_error (error,
-                   FLATPAK_ERROR, FLATPAK_ERROR_ONLY_PULLED,
-                   "As requested, %s was only pulled, but not installed",
-                   name);
+      flatpak_fail_error (error, FLATPAK_ERROR_ONLY_PULLED,
+                          _("As requested, %s was only pulled, but not installed"), name);
       goto out;
     }
 
@@ -1884,9 +1893,8 @@ flatpak_installation_update_full (FlatpakInstallation    *self,
   deploy_dir = flatpak_dir_get_if_deployed (dir, ref, NULL, cancellable);
   if (deploy_dir == NULL)
     {
-      g_set_error (error,
-                   FLATPAK_ERROR, FLATPAK_ERROR_NOT_INSTALLED,
-                   "%s branch %s is not installed", name, branch ? branch : "master");
+      flatpak_fail_error (error, FLATPAK_ERROR_NOT_INSTALLED,
+                          _("%s branch %s is not installed"), name, branch ? branch : "master");
       return NULL;
     }
 
@@ -1930,7 +1938,8 @@ flatpak_installation_update_full (FlatpakInstallation    *self,
                            ostree_progress, cancellable, error))
     goto out;
 
-  if (g_str_has_prefix (ref, "app"))
+  if (!(flags & FLATPAK_UPDATE_FLAGS_NO_TRIGGERS) &&
+      g_str_has_prefix (ref, "app"))
     flatpak_dir_run_triggers (dir_clone, cancellable, NULL);
 
   result = get_ref (dir, ref, cancellable, error);
@@ -2077,7 +2086,8 @@ flatpak_installation_uninstall_full (FlatpakInstallation    *self,
                               cancellable, error))
     return FALSE;
 
-  if (g_str_has_prefix (ref, "app"))
+  if (!(flags & FLATPAK_UNINSTALL_FLAGS_NO_TRIGGERS) &&
+      g_str_has_prefix (ref, "app"))
     flatpak_dir_run_triggers (dir_clone, cancellable, NULL);
 
   if (!(flags & FLATPAK_UNINSTALL_FLAGS_NO_PRUNE))
@@ -2575,7 +2585,7 @@ flatpak_installation_list_installed_related_refs_sync (FlatpakInstallation *self
 }
 
 /**
- * flatpak_installation_remove_local_ref_sync
+ * flatpak_installation_remove_local_ref_sync:
  * @self: a #FlatpakInstallation
  * @remote_name: the name of the remote
  * @ref: the ref
@@ -2592,6 +2602,7 @@ flatpak_installation_list_installed_related_refs_sync (FlatpakInstallation *self
  * referred to by @ref from the underlying OSTree repo, you should use
  * flatpak_installation_prune_local_repo() to do that.
  *
+ * Since: 0.10.0
  * Returns: %TRUE on success
  */
 gboolean
@@ -2611,7 +2622,7 @@ flatpak_installation_remove_local_ref_sync (FlatpakInstallation *self,
 }
 
 /**
- * flatpak_installation_cleanup_local_refs_sync
+ * flatpak_installation_cleanup_local_refs_sync:
  * @self: a #FlatpakInstallation
  * @cancellable: (nullable): a #GCancellable
  * @error: return location for a #GError
@@ -2644,14 +2655,15 @@ flatpak_installation_cleanup_local_refs_sync (FlatpakInstallation *self,
 }
 
 /**
- * flatpak_installation_prune_local_repo
+ * flatpak_installation_prune_local_repo:
  * @self: a #FlatpakInstallation
  * @cancellable: (nullable): a #GCancellable
  * @error: return location for a #GError
  *
  * Remove all orphaned OSTree objects from the underlying OSTree repo in
- * @installation.
+ * @self.
  *
+ * Since: 0.10.0
  * Returns: %TRUE on success
  */
 gboolean
@@ -2666,4 +2678,33 @@ flatpak_installation_prune_local_repo (FlatpakInstallation *self,
     return FALSE;
 
   return flatpak_dir_prune (dir, cancellable, error);
+}
+
+/**
+ * flatpak_installation_run_triggers:
+ * @self: a #FlatpakInstallation
+ * @cancellable: (nullable): a #GCancellable
+ * @error: return location for a #GError
+ *
+ * Run the trigger commands to update the files exported by the apps in
+ * @self. Should be used after one or more app install, upgrade or
+ * uninstall operations with the %FLATPAK_INSTALL_FLAGS_NO_TRIGGERS,
+ * %FLATPAK_UPDATE_FLAGS_NO_TRIGGERS or %FLATPAK_UNINSTALL_FLAGS_NO_TRIGGERS
+ * flags set.
+ *
+ * Since: 1.0.3
+ * Returns: %TRUE on success
+ */
+gboolean
+flatpak_installation_run_triggers (FlatpakInstallation *self,
+                                   GCancellable        *cancellable,
+                                   GError             **error)
+{
+  g_autoptr(FlatpakDir) dir = NULL;
+
+  dir = flatpak_installation_get_dir (self, error);
+  if (dir == NULL)
+    return FALSE;
+
+  return flatpak_dir_run_triggers (dir, cancellable, error);
 }

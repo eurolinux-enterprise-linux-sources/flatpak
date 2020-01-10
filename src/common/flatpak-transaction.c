@@ -21,7 +21,7 @@
 #include "config.h"
 
 #include <stdio.h>
-#include <glib/gi18n.h>
+#include <glib/gi18n-lib.h>
 #include <libsoup/soup.h>
 
 #include "flatpak-transaction-private.h"
@@ -44,6 +44,14 @@
  * This means you should either handle the signals directly (say, by doing blocking console
  * interaction, or by just returning without interaction), or run the operation in a separate
  * thread and do your own forwarding to the GUI thread.
+ *
+ * Despite the name, a FlatpakTransaction is more like a batch operation than a transaction
+ * in the database sense. Individual operations are carried out sequentially, and are atomic.
+ * They become visible to the system as they are completed. When an error occurs, already
+ * completed operations are not rolled back.
+ *
+ * The FlatpakTransaction API is threadsafe in the sense that it is safe to run two
+ * transactions at the same time, in different threads (or processes).
  */
 
 /* This is an internal-only element of FlatpakTransactionOperationType */
@@ -156,7 +164,7 @@ bundle_data_new (GFile  *file,
 
   data->file = g_object_ref (file);
   if (gpg_data)
-    data->gpg_data = g_object_ref (gpg_data);
+    data->gpg_data = g_bytes_ref (gpg_data);
 
   return data;
 }
@@ -828,6 +836,7 @@ flatpak_transaction_class_init (FlatpakTransactionClass *klass)
    * FlatpakTransaction::operation-done:
    * @object: A #FlatpakTransaction
    * @operation: The #FlatpakTransactionOperation which finished
+   * @commit: The commit
    * @result: A #FlatpakTransactionResult giving details about the result
    *
    * The ::operation-done signal gets emitted during the execution of
@@ -840,7 +849,7 @@ flatpak_transaction_class_init (FlatpakTransactionClass *klass)
                   G_STRUCT_OFFSET (FlatpakTransactionClass, operation_done),
                   NULL, NULL,
                   NULL,
-                  G_TYPE_NONE, 2, FLATPAK_TYPE_TRANSACTION_OPERATION, G_TYPE_INT);
+                  G_TYPE_NONE, 3, FLATPAK_TYPE_TRANSACTION_OPERATION, G_TYPE_STRING, G_TYPE_INT);
 
   /**
    * FlatpakTransaction::choose-remote-for-ref:
@@ -1405,7 +1414,7 @@ find_runtime_remote (FlatpakTransaction             *self,
   if (remotes == NULL || *remotes == NULL)
     {
       flatpak_fail_error (error, FLATPAK_ERROR_RUNTIME_NOT_FOUND,
-                          _("The Application %s requires the %s which was not found"),
+                          _("The application %s requires the runtime %s which was not found"),
                           app_pref, runtime_pref);
       return NULL;
     }
@@ -1421,7 +1430,7 @@ find_runtime_remote (FlatpakTransaction             *self,
     return g_strdup (remotes[res]);
 
   flatpak_fail_error (error, FLATPAK_ERROR_RUNTIME_NOT_FOUND,
-                      _("The Application %s requires the %s which is not installed"),
+                      _("The application %s requires the runtime %s which is not installed"),
                       app_pref, runtime_pref);
   return NULL;
 }
@@ -1438,11 +1447,13 @@ add_deps (FlatpakTransaction          *self,
   g_autofree char *runtime_remote = NULL;
   FlatpakTransactionOperation *runtime_op = NULL;
 
-  if (!g_str_has_prefix (op->ref, "app/"))
+  if (!op->resolved_metakey)
     return TRUE;
 
-  if (op->resolved_metakey)
+  if (g_str_has_prefix (op->ref, "app/"))
     runtime_ref = g_key_file_get_string (op->resolved_metakey, "Application", "runtime", NULL);
+  else
+    runtime_ref = g_key_file_get_string (op->resolved_metakey, "ExtensionOf", "runtime", NULL);
 
   if (runtime_ref == NULL)
     return TRUE;
@@ -1554,11 +1565,8 @@ flatpak_transaction_add_ref (FlatpakTransaction             *self,
   if (kind == FLATPAK_TRANSACTION_OPERATION_UPDATE)
     {
       if (!dir_ref_is_installed (priv->dir, ref, &origin, NULL))
-        {
-          g_set_error (error, FLATPAK_ERROR, FLATPAK_ERROR_NOT_INSTALLED,
-                       _("%s not installed"), pref);
-          return FALSE;
-        }
+        return flatpak_fail_error (error, FLATPAK_ERROR_NOT_INSTALLED,
+                                   _("%s not installed"), pref);
 
       if (flatpak_dir_get_remote_disabled (priv->dir, origin))
         {
@@ -1573,27 +1581,19 @@ flatpak_transaction_add_ref (FlatpakTransaction             *self,
           dir_ref_is_installed (priv->dir, ref, &origin, NULL))
         {
           if (g_strcmp0 (remote, origin) == 0)
-            {
-              g_set_error (error, FLATPAK_ERROR, FLATPAK_ERROR_ALREADY_INSTALLED,
-                           _("%s is already installed"), pref);
-              return FALSE;
-            }
+            return flatpak_fail_error (error, FLATPAK_ERROR_ALREADY_INSTALLED,
+                                       _("%s is already installed"), pref);
           else
-            {
-              g_set_error (error, FLATPAK_ERROR, FLATPAK_ERROR_DIFFERENT_REMOTE,
-                           _("%s is already installed from remote %s"), pref, origin);
-              return FALSE;
-            }
+            return flatpak_fail_error (error, FLATPAK_ERROR_DIFFERENT_REMOTE,
+                                       _("%s is already installed from remote %s"),
+                                       pref, origin);
         }
     }
   else if (kind == FLATPAK_TRANSACTION_OPERATION_UNINSTALL)
     {
       if (!dir_ref_is_installed (priv->dir, ref, &origin, NULL))
-        {
-          g_set_error (error, FLATPAK_ERROR, FLATPAK_ERROR_NOT_INSTALLED,
-                       _("%s not installed"), pref);
-          return FALSE;
-        }
+        flatpak_fail_error (error, FLATPAK_ERROR_NOT_INSTALLED,
+                            _("%s not installed"), pref);
 
       remote = origin;
     }
@@ -1622,6 +1622,10 @@ flatpak_transaction_add_ref (FlatpakTransaction             *self,
  * @error: return location for a #GError
  *
  * Adds installing the given ref to this transaction.
+ *
+ * The @remote can either be a configured remote of the installation,
+ * or a file:// uri pointing at a local repository to install from,
+ * in which case an origin remote is created.
  *
  * Returns: %TRUE on success; %FALSE with @error set on failure.
  */
@@ -1694,7 +1698,7 @@ flatpak_transaction_add_install_flatpakref (FlatpakTransaction *self,
   if (!g_key_file_load_from_data (keyfile, g_bytes_get_data (flatpakref_data, NULL),
                                   g_bytes_get_size (flatpakref_data),
                                   0, &local_error))
-    return flatpak_fail (error, "Invalid .flatpakref: %s", local_error->message);
+    return flatpak_fail_error (error, FLATPAK_ERROR_INVALID_DATA, _("Invalid .flatpakref: %s"), local_error->message);
 
   priv->flatpakrefs = g_list_append (priv->flatpakrefs, g_steal_pointer (&keyfile));
 
@@ -1790,6 +1794,9 @@ flatpak_transaction_update_metadata (FlatpakTransaction *self,
     return FALSE;
 
   flatpak_installation_drop_caches (priv->installation, NULL, NULL);
+
+  /* These are potentially out of date now */
+  g_hash_table_remove_all (priv->remote_states);
 
   return TRUE;
 }
@@ -2270,7 +2277,9 @@ handle_suggested_remote_name (FlatpakTransaction *self, GKeyFile *keyfile, GErro
   if (url == NULL)
     return TRUE;
 
-  collection_id = g_key_file_get_string (keyfile, FLATPAK_REF_GROUP, FLATPAK_REF_COLLECTION_ID_KEY, NULL);
+  collection_id = g_key_file_get_string (keyfile, FLATPAK_REF_GROUP, FLATPAK_REF_DEPLOY_COLLECTION_ID_KEY, NULL);
+  if (collection_id == NULL || *collection_id == '\0')
+    collection_id = g_key_file_get_string (keyfile, FLATPAK_REF_GROUP, FLATPAK_REF_COLLECTION_ID_KEY, NULL);
 
   if (remote_is_already_configured (self, url, collection_id))
     return TRUE;
@@ -2334,8 +2343,8 @@ handle_runtime_repo_deps (FlatpakTransaction *self, const char *id, const char *
   if (!g_key_file_load_from_data (dep_keyfile,
                                   g_bytes_get_data (dep_data, NULL),
                                   g_bytes_get_size (dep_data),
-                                  0, error))
-    return flatpak_fail (error, "Invalid .flatpakrepo: %s", local_error->message);
+                                  0, &local_error))
+    return flatpak_fail_error (error, FLATPAK_ERROR_INVALID_DATA, _("Invalid .flatpakrepo: %s"), local_error->message);
 
   uri = soup_uri_new (dep_url);
   basename = g_path_get_basename (soup_uri_get_path (uri));
@@ -2644,10 +2653,7 @@ flatpak_transaction_run (FlatpakTransaction *self,
 
   g_signal_emit (self, signals[READY], 0, &ready_res);
   if (!ready_res)
-    {
-      g_set_error (error, FLATPAK_ERROR, FLATPAK_ERROR_ABORTED, _("Aborted by user"));
-      return FALSE;
-    }
+    return flatpak_fail_error (error, FLATPAK_ERROR_ABORTED, _("Aborted by user"));
 
   for (l = priv->ops; l != NULL; l = l->next)
     {
@@ -2672,8 +2678,8 @@ flatpak_transaction_run (FlatpakTransaction *self,
            * remote is fixed. */
           !(op->fail_if_op_fails->kind == FLATPAK_TRANSACTION_OPERATION_UPDATE && g_str_has_prefix (op->ref, "app/")))
         {
-          g_set_error (&local_error, FLATPAK_ERROR, FLATPAK_ERROR_SKIPPED,
-                       _("Skipping %s due to previous error"), pref);
+          flatpak_fail_error (&local_error, FLATPAK_ERROR_SKIPPED,
+                              _("Skipping %s due to previous error"), pref);
           res = FALSE;
         }
       else if ((state = flatpak_transaction_ensure_remote_state (self, op->kind, op->remote, &local_error)) == NULL)
@@ -2846,8 +2852,13 @@ flatpak_transaction_run (FlatpakTransaction *self,
 
           if (!do_cont)
             {
-              g_set_error (error, FLATPAK_ERROR, FLATPAK_ERROR_ABORTED,
-                           _("Aborted due to failure"));
+              if (g_cancellable_set_error_if_cancelled (cancellable, error))
+                {
+                  succeeded = FALSE;
+                  break;
+                }
+
+              flatpak_fail_error (error, FLATPAK_ERROR_ABORTED, _("Aborted due to failure"));
               succeeded = FALSE;
               break;
             }

@@ -1,0 +1,26 @@
+Make sure rpath gets added for ostree libs
+
+We bundle ostree in the package, so we need to make sure an rpath
+gets set pointing to our bundled library.
+
+The Makefiles are missing the OSTREE_LIBS (and so the -Wl,-rpath),
+so add them in.
+--- flatpak-1.0.1/session-helper/Makefile.am.inc.old	2018-08-08 16:56:20.000000000 +0200
++++ flatpak-1.0.1/session-helper/Makefile.am.inc	2018-09-12 13:23:08.304959872 +0200
+@@ -12,5 +12,5 @@
+ 	session-helper/flatpak-session-helper.c	\
+ 	$(NULL)
+ 
+-flatpak_session_helper_LDADD = $(AM_LDADD) $(BASE_LIBS) libflatpak-common.la
++flatpak_session_helper_LDADD = $(AM_LDADD) $(BASE_LIBS) $(OSTREE_LIBS) libflatpak-common.la
+ flatpak_session_helper_CFLAGS = $(AM_CFLAGS) $(BASE_CFLAGS) $(SOUP_CFLAGS) $(OSTREE_CFLAGS) $(GSYSTEM_CFLAGS) $(JSON_CFLAGS) -DFLATPAK_COMPILATION
+--- flatpak-1.0.1/portal/Makefile.am.inc.old	2018-08-08 16:56:20.000000000 +0200
++++ flatpak-1.0.1/portal/Makefile.am.inc	2018-09-12 13:23:54.795014399 +0200
+@@ -34,6 +34,6 @@
+ BUILT_SOURCES += $(nodist_flatpak_portal_SOURCES)
+ CLEANFILES += $(nodist_flatpak_portal_SOURCES)
+ 
+-flatpak_portal_LDADD = $(AM_LDADD) $(BASE_LIBS)
++flatpak_portal_LDADD = $(AM_LDADD) $(BASE_LIBS) $(OSTREE_LIBS)
+ flatpak_portal_CFLAGS = $(AM_CFLAGS) $(BASE_CFLAGS) -DFLATPAK_COMPILATION
+ flatpak_portal_CPPFLAGS = $(AM_CPPFLAGS) -I$(builddir)/portal
